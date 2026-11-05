@@ -3,21 +3,39 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Web.Script.Serialization;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 namespace DesktopTodo {
  public partial class Dashboard {
   internal string VerifyCodexQuotaLayout(){
    UsageParser.VerifyCodex();
    UsageParser.VerifyCodexCards();
    ShowSessions();
-   Width=440;Height=380;UpdateLayout();
-   var cards=Elements(view).OfType<System.Windows.Controls.Primitives.UniformGrid>().Last();
-   if(cards.Columns!=1)throw new Exception("Narrow session cards should stack");
-   Width=900;Height=620;UpdateLayout();
-   var text=Elements(view).OfType<System.Windows.Controls.TextBlock>().Select(t=>t.Text).ToList();
-   if(cards.Columns!=2||!Elements(view).Contains(cards))throw new Exception("Session cards must reflow in place");
+   claudeUsage.Snapshot=UsageParser.Claude("{\"five_hour\":{\"utilization\":32},\"seven_day\":{\"utilization\":28},\"seven_day_sonnet\":{\"utilization\":14},\"seven_day_opus\":{\"utilization\":9}}");
+   gptUsage.Snapshot=UsageParser.Codex("{\"rate_limit\":{\"primary_window\":{\"used_percent\":32,\"limit_window_seconds\":18000},\"secondary_window\":{\"used_percent\":28,\"limit_window_seconds\":604800}}}");
+   UpdateUsage();
+   var claude=(StackPanel)usageCards.Children[0];
+   var codex=(StackPanel)usageCards.Children[1];
+   var codexCards=codex.Children.OfType<UniformGrid>().Single();
+   foreach(var width in new[]{440,650,900,440}){
+    Width=width;Height=380;UpdateLayout();
+    var viewport=Elements(view).OfType<ScrollContentPresenter>().Single();
+    var left=claude.TransformToAncestor(viewport).Transform(new Point());
+    var right=codex.TransformToAncestor(viewport).Transform(new Point());
+    if(Math.Abs(left.Y-right.Y)>1||left.X+claude.ActualWidth>right.X||right.X+codex.ActualWidth>viewport.ActualWidth+1)
+     throw new Exception("Claude and Codex must be visible side by side at "+width);
+    foreach(var provider in new[]{claude,codex}){
+     var firstCard=(FrameworkElement)provider.Children.OfType<UniformGrid>().Single().Children[0];
+     if(firstCard.TransformToAncestor(viewport).Transform(new Point(0,firstCard.ActualHeight)).Y>viewport.ActualHeight+1)
+      throw new Exception("Both providers' first cards must be visible at "+width);
+    }
+    if(codexCards.Columns!=(width==900?2:1))throw new Exception("Cards must reflow within their provider column");
+   }
+   var text=Elements(view).OfType<TextBlock>().Select(t=>t.Text).ToList();
    if(text.Count(t=>t=="5시간 한도")!=1||text.Count(t=>t=="주간 한도")!=1)throw new Exception("Codex quota cards must be separate and visible");
    App.Capture(this,"codex-quota-preview.png");
-   return "PASS: responsive session cards and separate five-hour and weekly Codex limits, with independent values and resets.";
+   return "PASS: Claude left and Codex right, with both visible at 440, 650 and 900 pixels, and separate Codex limits.";
   }
  }
  public static partial class UsageParser {

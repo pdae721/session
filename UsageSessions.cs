@@ -107,13 +107,32 @@ namespace DesktopTodo {
   public void Dispose(){disposed=true;Changed=null;foreach(var item in pending.Values.ToArray())item.TrySetCanceled();pending.Clear();Browser.Dispose();}
  }
  public partial class Dashboard {
-  UsageConnection claudeUsage,gptUsage,loginConnection;Grid engines;DispatcherTimer usageTimer;Border loginOverlay;Grid usageRoot;ScrollViewer usageScroll;WrapPanel usageCards;TextBlock usageInfo;
+  UsageConnection claudeUsage,gptUsage,loginConnection;Grid engines;DispatcherTimer usageTimer;Border loginOverlay;Grid usageRoot,usageCards;
   public void ShowSessions(){
    screen="sessions";Render();
    if(!Storage.IsTest||Environment.GetCommandLineArgs().Contains("--session-test"))StartUsage();
   }
   UIElement SessionsView(){
-   if(usageRoot!=null)return usageRoot;usageRoot=new Grid();usageRoot.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});usageRoot.RowDefinitions.Add(new RowDefinition());usageRoot.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});var header=new DockPanel{Margin=new Thickness(0,0,0,10)};var refresh=Design.Button("새로고침",async()=>await RefreshUsage(true));DockPanel.SetDock(refresh,Dock.Right);header.Children.Add(refresh);header.Children.Add(Design.Text("구독 사용량",19));Design.Put(usageRoot,header,0,0);usageCards=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Center};usageScroll=new ScrollViewer{Content=usageCards,HorizontalContentAlignment=HorizontalAlignment.Center,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};usageScroll.SizeChanged+=(o,e)=>SizeUsageCards();Design.Put(usageRoot,usageScroll,1,0);usageInfo=Design.Text("",10,Design.Muted);usageInfo.Margin=new Thickness(0,8,0,0);Design.Put(usageRoot,usageInfo,2,0);
+   if(usageRoot!=null)return usageRoot;
+   usageRoot=new Grid();
+   usageRoot.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});
+   usageRoot.RowDefinitions.Add(new RowDefinition());
+
+   var header=new DockPanel{Margin=new Thickness(0,0,0,10)};
+   var refresh=Design.Button("새로고침",async()=>await RefreshUsage(true));
+   DockPanel.SetDock(refresh,Dock.Right);
+   header.Children.Add(refresh);
+   header.Children.Add(Design.Text("구독 사용량",19));
+   Design.Put(usageRoot,header,0,0);
+
+   usageCards=new Grid{MaxWidth=1220};
+   usageCards.ColumnDefinitions.Add(new ColumnDefinition());
+   usageCards.ColumnDefinitions.Add(new ColumnDefinition());
+   var scroll=new ScrollViewer{
+    Content=usageCards,HorizontalContentAlignment=HorizontalAlignment.Stretch,
+    VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled
+   };
+   Design.Put(usageRoot,scroll,1,0);
    UpdateUsage();return usageRoot;
   }
   void SetupUsage(){
@@ -131,17 +150,41 @@ namespace DesktopTodo {
     }catch(IOException){}catch(UnauthorizedAccessException){}
    }
    if(usageCards==null)return;
-   usageCards.Children.Clear();foreach(var connection in new[]{claudeUsage,gptUsage}){var c=connection;var snapshot=c.Snapshot;var panel=new StackPanel{Margin=new Thickness(5,0,5,12)};var head=new DockPanel();var button=Design.Button(snapshot.Metrics.Count>0?"계정":"연결",()=>OpenUsageLogin(c));button.Padding=new Thickness(7,4,7,4);DockPanel.SetDock(button,Dock.Right);head.Children.Add(button);head.Children.Add(Design.Text(c.Provider,16));panel.Children.Add(head);var statusText=Design.Text(snapshot.Status,11,Design.Muted);statusText.Margin=new Thickness(0,5,0,8);panel.Children.Add(statusText);var metrics=new System.Windows.Controls.Primitives.UniformGrid{Columns=1};panel.Children.Add(metrics);if(c.Provider=="Codex"){foreach(var metric in UsageParser.CodexCards(snapshot))metrics.Children.Add(UsageCard(metric,c.Provider));}else{if(snapshot.Metrics.Count==0)metrics.Children.Add(UsageCard(new UsageMetric{Label="사용률 / 잔여량",Text="—"},c.Provider));foreach(var metric in snapshot.Metrics)metrics.Children.Add(UsageCard(metric,c.Provider));}var detail=Design.Text(snapshot.Detail,10,Design.Muted);detail.Margin=new Thickness(0,7,0,0);panel.Children.Add(detail);if(snapshot.Updated.HasValue)panel.Children.Add(Design.Text("마지막 확인 "+snapshot.Updated.Value.ToLocalTime().ToString("HH:mm:ss"),9,Design.Muted));usageCards.Children.Add(panel);}usageInfo.Text="로그인 상태는 이 PC에 유지됩니다. ‘연결’은 같은 위젯 안에서 열립니다.";SizeUsageCards();ApplyCommandSizes();}
-  void SizeUsageCards(){
-   double available=usageScroll.ActualWidth>0?usageScroll.ActualWidth:Width-30;
-   double groupWidth=Math.Max(120,Math.Min(600,Math.Floor((available-10)/2)-10));
-   foreach(StackPanel group in usageCards.Children){
-    group.Width=groupWidth;
-    var metrics=group.Children.OfType<System.Windows.Controls.Primitives.UniformGrid>().Single();
-    metrics.Columns=Math.Max(1,Math.Min(metrics.Children.Count,(int)(groupWidth/162)));
-   }
+   usageCards.Children.Clear();
+   Design.Put(usageCards,UsageProviderColumn(claudeUsage),0,0);
+   Design.Put(usageCards,UsageProviderColumn(gptUsage),0,1);
+   ApplyCommandSizes();
   }
-  UIElement UsageCard(UsageMetric metric,string provider){var p=new StackPanel{Margin=new Thickness(3)};var value=Design.Text(metric.Used.HasValue?metric.Used.Value.ToString("0.#")+"%":metric.Text??"—",metric.Used.HasValue?28:22);value.HorizontalAlignment=HorizontalAlignment.Center;value.TextAlignment=TextAlignment.Center;p.Children.Add(value);if(metric.Used.HasValue){var remaining=Design.Text(metric.Remaining,12,Design.Muted);remaining.HorizontalAlignment=HorizontalAlignment.Center;p.Children.Add(remaining);p.Children.Add(new ProgressBar{Minimum=0,Maximum=100,Value=metric.Used.Value,Height=4,Margin=new Thickness(0,9,0,7),Foreground=provider=="Claude"?UI.Color("#DE9C81"):UI.Color("#8FCDB8"),Background=UI.Color("#393840")});var reset=Design.Text(metric.ResetText,10,Design.Muted);reset.TextAlignment=TextAlignment.Center;p.Children.Add(reset);}var label=Design.Text(metric.Label,11,provider=="Claude"?UI.Color("#DE9C81"):UI.Color("#8FCDB8"));label.Margin=new Thickness(0,8,0,0);label.TextAlignment=TextAlignment.Center;p.Children.Add(label);return new Border{Child=p,Background=UI.Color("#202126"),BorderBrush=UI.Color("#454249"),BorderThickness=new Thickness(3),CornerRadius=new CornerRadius(17),Padding=new Thickness(12),Margin=new Thickness(3,0,3,8)};}
+  UIElement UsageProviderColumn(UsageConnection connection){
+   var snapshot=connection.Snapshot;
+   var column=new StackPanel{Margin=new Thickness(5,0,5,12),VerticalAlignment=VerticalAlignment.Top};
+   var head=new DockPanel();
+   var account=Design.Button(snapshot.Metrics.Count>0?"계정":"연결",()=>OpenUsageLogin(connection));
+   account.ToolTip="로그인은 이 위젯에서 열리며 이 PC에 유지됩니다.";
+   DockPanel.SetDock(account,Dock.Right);
+   head.Children.Add(account);
+   head.Children.Add(Design.Text(connection.Provider,16));
+   column.Children.Add(head);
+
+   var statusText=Design.Text(snapshot.Status,11,Design.Muted);
+   statusText.Margin=new Thickness(0,5,0,8);
+   column.Children.Add(statusText);
+   var metrics=new System.Windows.Controls.Primitives.UniformGrid{Columns=1};
+   var cards=connection==gptUsage?UsageParser.CodexCards(snapshot):snapshot.Metrics;
+   if(cards.Count==0)metrics.Children.Add(UsageCard(new UsageMetric{Label="사용률 / 잔여량",Text="—"},connection.Provider));
+   foreach(var metric in cards)metrics.Children.Add(UsageCard(metric,connection.Provider));
+   metrics.SizeChanged+=(o,e)=>{
+    metrics.Columns=Math.Max(1,Math.Min(metrics.Children.Count,(int)(e.NewSize.Width/162)));
+   };
+   column.Children.Add(metrics);
+
+   var detail=Design.Text(snapshot.Detail,10,Design.Muted);
+   detail.Margin=new Thickness(0,7,0,0);
+   column.Children.Add(detail);
+   if(snapshot.Updated.HasValue)column.Children.Add(Design.Text("마지막 확인 "+snapshot.Updated.Value.ToLocalTime().ToString("HH:mm:ss"),9,Design.Muted));
+   return column;
+  }
+  UIElement UsageCard(UsageMetric metric,string provider){var p=new StackPanel{Margin=new Thickness(1)};var value=Design.Text(metric.Used.HasValue?metric.Used.Value.ToString("0.#")+"%":metric.Text??"—",metric.Used.HasValue?28:22);value.HorizontalAlignment=HorizontalAlignment.Center;value.TextAlignment=TextAlignment.Center;p.Children.Add(value);if(metric.Used.HasValue){var remaining=Design.Text(metric.Remaining,12,Design.Muted);remaining.HorizontalAlignment=HorizontalAlignment.Center;p.Children.Add(remaining);p.Children.Add(new ProgressBar{Minimum=0,Maximum=100,Value=metric.Used.Value,Height=4,Margin=new Thickness(0,7,0,6),Foreground=provider=="Claude"?UI.Color("#DE9C81"):UI.Color("#8FCDB8"),Background=UI.Color("#393840")});var reset=Design.Text(metric.ResetText,10,Design.Muted);reset.TextAlignment=TextAlignment.Center;p.Children.Add(reset);}var label=Design.Text(metric.Label,11,provider=="Claude"?UI.Color("#DE9C81"):UI.Color("#8FCDB8"));label.Margin=new Thickness(0,6,0,0);label.TextAlignment=TextAlignment.Center;p.Children.Add(label);return new Border{Child=p,Background=UI.Color("#202126"),BorderBrush=UI.Color("#454249"),BorderThickness=new Thickness(3),CornerRadius=new CornerRadius(17),Padding=new Thickness(8),Margin=new Thickness(3,0,3,8)};}
   void OpenUsageLogin(UsageConnection connection){if(loginOverlay!=null)return;loginConnection=connection;var panel=new DockPanel();var controls=new DockPanel{Margin=new Thickness(0,0,0,8)};var buttons=UI.Row();buttons.Children.Add(Design.Button("새로고침",()=>{if(connection.Browser.CoreWebView2!=null)connection.Browser.Reload();else connection.OpenLogin();}));buttons.Children.Add(Design.Button("카드로 돌아가기",async()=>{CloseUsageLogin(connection);await connection.Refresh();}));DockPanel.SetDock(buttons,Dock.Right);controls.Children.Add(buttons);controls.Children.Add(Design.Text(connection.Provider+" 계정 연결",14));DockPanel.SetDock(controls,Dock.Top);panel.Children.Add(controls);engines.Children.Remove(connection.Browser);panel.Children.Add(connection.Browser);loginOverlay=new Border{Child=panel,Margin=new Thickness(10),Padding=new Thickness(10),Background=Design.Paper,BorderBrush=Design.Teal,BorderThickness=new Thickness(1)};chrome.Children.Add(loginOverlay);ApplyCommandSizes();connection.OpenLogin();}
   void CloseUsageLogin(UsageConnection connection){if(loginOverlay==null)return;((DockPanel)loginOverlay.Child).Children.Remove(connection.Browser);chrome.Children.Remove(loginOverlay);loginOverlay=null;loginConnection=null;engines.Children.Add(connection.Browser);UpdateUsage();}
   internal async Task<string> VerifyUsageSessions(){UsageParser.Verify();UsageParser.VerifyCodex();UsageParser.VerifyCodexCards();ShowSessions();for(int n=0;n<100&&(claudeUsage.Browser.CoreWebView2==null||gptUsage.Browser.CoreWebView2==null);n++)await Task.Delay(200);if(claudeUsage.Browser.CoreWebView2==null||gptUsage.Browser.CoreWebView2==null)throw new Exception("Inline session initialization failed");UpdateLayout();App.Capture(this,"session-preview.png");return "PASS: inline session view; two persistent service profiles; always-visible five-hour and weekly Codex cards; independent periods; no daily substitution; remaining/reset calculations; missing values stay unknown. Account login and live account values require user login.";}
