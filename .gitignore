@@ -1,0 +1,17 @@
+_archive/
+.build/
+*.exe
+*.dll
+*.pdb
+*.zip
+*.png
+*-results.txt
+vault-check.txt
+session-status.txt
+DesktopTodoVault/
+.profiles/
+Tasks/
+History/
+Recovery/
+settings.json
+data.json
